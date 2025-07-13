@@ -1,0 +1,143 @@
+name: 3-Stage CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  # Stage 1: Build
+  build:
+    name: Build Stage
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Build application
+      run: |
+        mkdir -p dist
+        cp -r public dist/
+        cp server.js dist/
+        cp package.json dist/
+        cp package-lock.json dist/
+        cd dist && npm ci --only=production
+    
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-artifacts
+        path: dist/
+        retention-days: 7
+
+  # Stage 2: Test
+  test:
+    name: Test Stage
+    runs-on: ubuntu-latest
+    needs: build
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Run linting
+      run: npm run lint
+    
+    - name: Run unit tests
+      run: npm test
+    
+    - name: Test server health
+      run: |
+        npm start &
+        sleep 5
+        curl -f http://localhost:3000/health
+        pkill -f "node server.js" || true
+    
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: build-artifacts
+        path: dist/
+    
+    - name: Test built application
+      run: |
+        cd dist
+        npm start &
+        sleep 5
+        curl -f http://localhost:3000/health
+        pkill -f "node server.js" || true
+
+  # Stage 3: Deploy to AWS
+  deploy:
+    name: Deploy to AWS Stage
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: build-artifacts
+        path: dist/
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
+    
+    - name: Deploy to AWS EC2
+      run: |
+        # Create deployment package
+        tar -czf xo-game.tar.gz -C dist .
+        
+        # Deploy to EC2 instance
+        scp -o StrictHostKeyChecking=no -i ${{ secrets.AWS_SSH_KEY }} xo-game.tar.gz ${{ secrets.AWS_USER }}@${{ secrets.AWS_HOST }}:/tmp/
+        
+        ssh -o StrictHostKeyChecking=no -i ${{ secrets.AWS_SSH_KEY }} ${{ secrets.AWS_USER }}@${{ secrets.AWS_HOST }} << 'EOF'
+          cd /tmp
+          tar -xzf xo-game.tar.gz
+          sudo systemctl stop xo-game || true
+          sudo cp -r * /opt/xo-game/
+          cd /opt/xo-game
+          npm ci --only=production
+          sudo systemctl start xo-game
+          sudo systemctl enable xo-game
+          rm -rf /tmp/*
+        EOF
+    
+    - name: Verify deployment
+      run: |
+        sleep 10
+        curl -f http://${{ secrets.AWS_HOST }}/health
+    
+    - name: Notify deployment success
+      run: |
+        echo "🚀 Successfully deployed to AWS!"
+        echo "Application is live at: http://${{ secrets.AWS_HOST }}" 
