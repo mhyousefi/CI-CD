@@ -23,7 +23,7 @@ A real-time multiplayer Tic Tac Toe (XO) game built with Node.js, Express, and S
 
 1. Clone the repository:
 ```bash
-git clone <your-repo-url>
+git clone <https://github.com/HatemMohmmed73/CI-CD>
 cd xo-game
 ```
 
