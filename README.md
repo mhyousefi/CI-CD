@@ -32,12 +32,10 @@ The pipeline consists of **three stages**:
 5. Set the start command: `npm start`
 6. Complete the setup and deploy your service
 
-### Step 2: Create a Render Deploy Hook
+### Step 2: Get Render Deploy Hook
 1. In your Render service dashboard, go to **Settings**
 2. Scroll to **Deploy Hooks**
-3. Click **Add Deploy Hook**
-4. Name it (e.g., "GitHub Actions Deploy") and create it
-5. Copy the generated URL (e.g., `https://api.render.com/deploy/srv-xxxxxx?key=yyyyyy`)
+3. Copy ** Deploy Hook**
 
 ### Step 3: Add the Deploy Hook to GitHub Secrets
 1. Go to your GitHub repo → **Settings** → **Secrets and variables** → **Actions**
