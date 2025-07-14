@@ -1,178 +1,204 @@
-# CI/CD Pipeline for XO Game
+# CI/CD Pipeline Setup Guide
 
-This repository contains GitHub Actions workflows for continuous integration and deployment of the XO (Tic-Tac-Toe) game.
+This guide explains how to set up a complete CI/CD pipeline for a Node.js project using GitHub Actions and Render. It covers the three main stages (Build, Test, Deploy), how to configure deployment to Render using a deploy hook, and how to verify your deployment.
 
-## Workflow Files
+---
 
-### 1. `test.yml` - Simple Test Workflow
-- **Purpose**: Basic testing and linting
-- **Triggers**: Push to main/develop, pull requests, manual dispatch
-- **Jobs**: 
-  - Test and lint the codebase
-  - Run unit tests
-  - Test server health endpoint
-  - Upload test results as artifacts
+## 1. Pipeline Overview
 
-### 2. `ci-cd.yml` - Full CI/CD Pipeline
-- **Purpose**: Complete CI/CD pipeline with testing, security, and deployment
-- **Triggers**: Push to main/develop, pull requests, manual dispatch
-- **Jobs**:
-  - **Test and Lint**: Multi-node version testing (16.x, 18.x, 20.x)
-  - **Security Audit**: npm audit with moderate level
-  - **Build**: Create deployment package
-  - **Deploy Staging**: Deploy to staging environment (develop branch)
-  - **Deploy Production**: Deploy to production environment (main branch)
-  - **Performance Test**: Optional performance testing
+The pipeline consists of **three stages**:
 
-## Setup Instructions
+1. **Build Stage**: Installs dependencies and prepares the application for deployment.
+2. **Test Stage**: Runs automated tests and health checks to ensure code quality.
+3. **Deploy Stage**: Triggers a deployment to Render using a secure deploy hook.
 
-### 1. Repository Setup
-1. Push your code to a GitHub repository
-2. Ensure your repository has the following structure:
-   ```
-   .github/
-   └── workflows/
-       ├── test.yml
-       └── ci-cd.yml
-   ```
+---
 
-### 2. Environment Setup
-For the full CI/CD pipeline, you'll need to set up environments in GitHub:
+## 2. Prerequisites
 
-1. Go to your repository settings
-2. Navigate to "Environments"
-3. Create two environments:
-   - `staging`
-   - `production`
+- A GitHub repository for your Node.js project
+- A [Render](https://render.com/) account
+- Your app set up as a Render Web Service (Node.js)
 
-### 3. Secrets Configuration (Optional)
-If you're deploying to external services, add these secrets to your repository:
-- `DEPLOY_SSH_KEY`: SSH private key for server deployment
-- `DEPLOY_HOST`: Target server hostname
-- `DEPLOY_PATH`: Path on target server
-- `DOCKER_REGISTRY`: Docker registry URL
-- `DOCKER_USERNAME`: Docker registry username
-- `DOCKER_PASSWORD`: Docker registry password
+---
 
-## Usage
+## 3. Step-by-Step CI/CD Setup
 
-### Testing the Pipeline
+### Step 1: Create a Render Web Service
+1. Log in to [Render](https://render.com/)
+2. Click **New +** → **Web Service**
+3. Connect your GitHub repo and select your project
+4. Set the build command: `npm ci`
+5. Set the start command: `npm start`
+6. Complete the setup and deploy your service
 
-1. **Simple Test**: Push to any branch to trigger the basic test workflow
-   ```bash
-   git add .
-   git commit -m "Test CI/CD pipeline"
-   git push origin main
-   ```
+### Step 2: Create a Render Deploy Hook
+1. In your Render service dashboard, go to **Settings**
+2. Scroll to **Deploy Hooks**
+3. Click **Add Deploy Hook**
+4. Name it (e.g., "GitHub Actions Deploy") and create it
+5. Copy the generated URL (e.g., `https://api.render.com/deploy/srv-xxxxxx?key=yyyyyy`)
 
-2. **Manual Trigger**: Go to Actions tab in GitHub and manually trigger workflows
+### Step 3: Add the Deploy Hook to GitHub Secrets
+1. Go to your GitHub repo → **Settings** → **Secrets and variables** → **Actions**
+2. Click **New repository secret**
+3. Name: `RENDER_DEPLOY_HOOK`
+4. Value: (Paste your Render deploy hook URL)
+5. Click **Add secret**
 
-### Deployment
-
-1. **Staging Deployment**: Push to `develop` branch
-   ```bash
-   git checkout develop
-   git add .
-   git commit -m "Deploy to staging"
-   git push origin develop
-   ```
-
-2. **Production Deployment**: Push to `main` branch
-   ```bash
-   git checkout main
-   git add .
-   git commit -m "Deploy to production"
-   git push origin main
-   ```
-
-## Customization
-
-### Modify Deployment Commands
-Edit the deployment steps in `ci-cd.yml`:
+### Step 4: Add the CI/CD Workflow File
+1. In your repo, create `.github/workflows/three-stage.yml` with the following structure:
 
 ```yaml
-- name: Deploy to production
-  run: |
-    # Example: Deploy to VPS via SSH
-    echo "${{ secrets.DEPLOY_SSH_KEY }}" > deploy_key
-    chmod 600 deploy_key
-    rsync -avz -e "ssh -i deploy_key" dist/ user@${{ secrets.DEPLOY_HOST }}:${{ secrets.DEPLOY_PATH }}
-    rm deploy_key
-    
-    # Example: Deploy to Docker
-    docker build -t your-app .
-    docker tag your-app ${{ secrets.DOCKER_REGISTRY }}/your-app:latest
-    echo ${{ secrets.DOCKER_PASSWORD }} | docker login ${{ secrets.DOCKER_REGISTRY }} -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
-    docker push ${{ secrets.DOCKER_REGISTRY }}/your-app:latest
+name: 3-Stage CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Stage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Build application
+        run: |
+          mkdir -p dist
+          cp -r public dist/
+          cp server.js dist/
+          cp package.json dist/
+          cp package-lock.json dist/
+          cd dist && npm ci --only=production
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: dist/
+          retention-days: 7
+
+  test:
+    name: Test Stage
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Run linting (optional)
+        run: npm run lint || echo "Linting failed but continuing..."
+        continue-on-error: true
+      - name: Run unit tests
+        run: npm test -- --verbose --detectOpenHandles
+      - name: Test server health (with retry)
+        run: |
+          npm start &
+          SERVER_PID=$!
+          for i in {1..30}; do
+            if curl -f http://localhost:3000/health > /dev/null 2>&1; then
+              echo "Server is ready!"
+              break
+            fi
+            sleep 2
+          done
+          curl -f http://localhost:3000/health
+          kill $SERVER_PID || true
+          wait $SERVER_PID 2>/dev/null || true
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts
+          path: dist/
+      - name: Test built application
+        run: |
+          cd dist
+          npm start &
+          SERVER_PID=$!
+          for i in {1..30}; do
+            if curl -f http://localhost:3000/health > /dev/null 2>&1; then
+              echo "Built server is ready!"
+              break
+            fi
+            sleep 2
+          done
+          curl -f http://localhost:3000/health
+          kill $SERVER_PID || true
+          wait $SERVER_PID 2>/dev/null || true
+
+  deploy:
+    name: Deploy to Render
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Trigger Render Deploy Hook
+        run: |
+          curl -X POST "$RENDER_DEPLOY_HOOK"
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+      - name: Notify deployment success
+        run: |
+          echo "🚀 Successfully triggered Render deployment!"
+          echo "Application is live at: https://your-app.onrender.com/"
 ```
 
-### Add Performance Testing
-Install performance testing tools and add to package.json:
+---
 
-```json
-{
-  "scripts": {
-    "test:performance": "artillery run performance-tests.yml"
-  },
-  "devDependencies": {
-    "artillery": "^2.0.0"
-  }
-}
-```
+## 4. How to Check Deployment Status
 
-### Add Docker Support
-Create a `Dockerfile`:
+### A. On GitHub Actions
+- Go to your repo → **Actions** tab
+- Click on the latest workflow run
+- Ensure all three stages (Build, Test, Deploy) are green
 
-```dockerfile
-FROM node:18-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-COPY . .
-EXPOSE 3000
-CMD ["npm", "start"]
-```
+### B. On Render
+- Go to your Render dashboard
+- Open your service
+- Check the **Events** tab for deployment status
+- You should see a new deployment triggered by the deploy hook
 
-## Monitoring
+### C. Using the Deploy Hook
+- The deploy step in your workflow triggers the deploy hook via `curl`
+- You can also manually trigger a deployment by running:
+  ```bash
+  curl -X POST "<your-render-deploy-hook-url>"
+  ```
+- This will start a new deployment on Render
 
-### View Workflow Results
-1. Go to your GitHub repository
-2. Click on "Actions" tab
-3. Select the workflow you want to view
-4. Check the logs for any failures
+---
 
-### Artifacts
-- Test results are uploaded as artifacts
-- Security audit results are stored for 30 days
-- Deployment packages are available for download
+## 5. Troubleshooting
 
-## Troubleshooting
+- **Malformed input to a URL function**: Check that your `RENDER_DEPLOY_HOOK` secret is set correctly and contains the full URL.
+- **Deployment not triggered**: Make sure the deploy hook is correct and your workflow references the secret properly.
+- **Build or test failures**: Check the logs in the Actions tab for details.
 
-### Common Issues
+---
 
-1. **Linting Fails**: Run `npm run lint:fix` locally to fix issues
-2. **Tests Fail**: Check test output in the Actions logs
-3. **Security Audit Fails**: Update dependencies with `npm audit fix`
-4. **Deployment Fails**: Check your deployment configuration and secrets
+## 6. Summary
 
-### Debugging
-- Enable debug logging by adding `ACTIONS_STEP_DEBUG: true` to repository secrets
-- Check the "Actions" tab for detailed logs
-- Use `workflow_dispatch` trigger for manual testing
+- Set up your Render service and deploy hook
+- Add the deploy hook as a GitHub secret
+- Use the provided workflow for a 3-stage CI/CD pipeline
+- Every push to `main` will build, test, and deploy your app to Render automatically
 
-## Best Practices
+---
 
-1. **Branch Protection**: Enable branch protection rules for main branch
-2. **Required Checks**: Make CI checks required before merging
-3. **Code Review**: Require code review for pull requests
-4. **Environment Protection**: Use environment protection rules for production
-5. **Secrets Management**: Use GitHub secrets for sensitive data
-6. **Artifact Cleanup**: Set appropriate retention periods for artifacts
-
-## Support
-
-For issues with the CI/CD pipeline:
-1. Check the Actions tab for error logs
-2. Verify your repository structure matches the expected layout
-3. Ensure all required dependencies are in package.json
-4. Test locally before pushing to GitHub 
+For more details, see [Render Deploy Hooks Documentation](https://render.com/docs/deploy-hooks). 
