@@ -28,7 +28,7 @@ The pipeline consists of **three stages**:
 1. Log in to [Render](https://render.com/)
 2. Click **New +** → **Web Service**
 3. Connect your GitHub repo and select your project
-4. Set the build command: `npm ci`
+4. Set the build command: `npm install`
 5. Set the start command: `npm start`
 6. Complete the setup and deploy your service
 
